@@ -1,8 +1,11 @@
+import logging
 from github import Github, UnknownObjectException
 from flask import render_template
 from jinja2 import TemplateNotFound
 import requests
 from collections import defaultdict
+
+# import github; github.enable_console_debug_logging()
 
 class GithubBot():
   def __init__(self, constants, repo_name, langs, current):
@@ -31,33 +34,35 @@ class GithubBot():
     return dict(zip(self.languages, results))
 
   def process_hook(self, pull_request_id, url, args, storage):
+    logging.error('@@ %r', locals())
     message = self.constants.get('GH_BOT_MESSAGE')
     ci_restart_url = self.constants.get('CI_RESTART_URL')
     ci_api_key = self.constants.get('CI_API_KEY')
     build_id = args.get('build_id')
-    if build_id:
-      pr = self.repo.get_pull(pull_request_id)
-      base_commit_sha = pr.base.sha
-      if not storage.get('master'):
-        default = dict(zip(self.languages, self.current))
-        default.update({'repo_name': self.repo.name, 'build_id': '1'})
-        storage.set('master', {'current': default, 'base_commit_sha': default})
-      if base_commit_sha not in storage.get('master'):
-        base_commit_sha = sorted(storage.get('master').items(), key=lambda x: x[1]['build_id'])[0][0]
-      # Sometimes coverage reports do funky things. This should prevent recording most of them.
-      coverage_diffs = self.do_for_each_language(lambda l: float(args.get(l, 0)) - float(storage.get('master').get(base_commit_sha).get(l)))
-      if min(coverage_diffs.values()) < -10:
-        commit = self.repo.get_commit(args.get('commit_id')) or pr.get_commits().reversed[0]
-        user = storage.get(commit.author.login) or {'name': commit.author.name, 'login': commit.author.login}
-        if ci_restart_url and user.get('dangerously_low') != True:
-          user['dangerously_low'] = True
-          storage.set(pr.user.login, user)
-          url = ci_restart_url.replace('$build_id$', build_id).replace('$api_key$', ci_api_key)
-          requests.post(url)
-          body = "Something doesn't look right... I'm re-running the coverage reports." \
-            + "This comment will be updated when I'm done."
-          self.post_comment(body, pr)
-          return False
+    coverage_diffs = {}
+    base_commit_sha = None
+    if not storage.get('master'):
+      default = dict(zip(self.languages, self.current))
+      default.update({'repo_name': self.repo.name, 'build_id': '1'})
+      storage.set('master', {'current': default, 'base_commit_sha': default})
+    pr = self.repo.get_pull(pull_request_id)
+    base_commit_sha = pr.base.sha
+    if base_commit_sha not in storage.get('master'):
+      base_commit_sha = sorted(storage.get('master').items(), key=lambda x: x[1]['build_id'])[0][0]
+    # Sometimes coverage reports do funky things. This should prevent recording most of them.
+    coverage_diffs = self.do_for_each_language(lambda l: float(args.get(l, 0)) - float(storage.get('master').get(base_commit_sha).get(l, 0)))
+    if min(coverage_diffs.values()) < -10:
+      commit = self.repo.get_commit(args.get('commit_id')) or pr.get_commits().reversed[0]
+      user = storage.get(commit.author.login) or {'name': commit.author.name, 'login': commit.author.login}
+      if build_id and ci_restart_url and user.get('dangerously_low') != True:
+        user['dangerously_low'] = True
+        storage.set(pr.user.login, user)
+        url = ci_restart_url.replace('$build_id$', build_id).replace('$api_key$', ci_api_key)
+        requests.post(url)
+        body = "Something doesn't look right... I'm re-running the coverage reports." \
+               + "This comment will be updated when I'm done."
+        self.post_comment(body, pr)
+        return False
     self.update_leaderboard(pull_request_id, args, storage, coverage_diffs,)
     self.comment(pull_request_id, message, url, args, storage, coverage_diffs, base_commit_sha)
     return True
@@ -80,6 +85,8 @@ class GithubBot():
       user['net_contribution'] = sum(contribution.values())
       user['dangerously_low'] = False
       storage.set(pr.user.login, user)
+    else:
+      logging.error('No storage, not updating leaderboard!')
 
   def comment(self, pull_request_id, message, url, args, storage, coverage_diffs, base_commit_sha):
     pr = self.repo.get_pull(pull_request_id)
@@ -96,11 +103,12 @@ class GithubBot():
     self.post_comment(body, pr)
 
   def post_comment(self, body, pr):
-    past_comment = self.past_comment(pr)
-    if past_comment:
-      past_comment.edit(body)
-    else:
-      pr.create_issue_comment(body)
+    if self.constants.get('GH_COMMENT').lower() == 'true':
+      past_comment = self.past_comment(pr)
+      if past_comment:
+        past_comment.edit(body)
+      else:
+        pr.create_issue_comment(body)
 
   def get_pr_by_branch(self, branch_name):
     cached = self.cache['prs'].get(branch_name)
@@ -134,4 +142,13 @@ class GithubBot():
       return self.get_pr_by_number(number_or_id)
     except UnknownObjectException:
       return self.get_pr_by_id(number_or_id)
+
+  def get_pr_by_commit(self, sha):
+    cached = self.cache['prs'].get(sha)
+    if cached:
+      return cached
+    prs = self.g.search_issues('%s type:pr is:merged' % sha)
+    if prs:
+      self.cache['prs'][sha] = prs[0]
+      return prs[0]
 

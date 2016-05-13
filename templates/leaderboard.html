@@ -1,14 +1,14 @@
 {% extends "_leaderboard.html" %}
 {% block extra %}
-<hr>
-<p>
-  <h4>Goto Coverage Report</h4>
-  <p>
-    CI Build Number:
-    <input type='text' id='ci_build_number'>
-    <button type='button' id='ci_build_number_btn' class='btn btn-default'>Go!</button>
-  </p>
-</p>
+<!-- <hr> -->
+<!-- <p> -->
+<!--   <h4>Goto Coverage Report</h4> -->
+<!--   <p> -->
+<!--     CI Build Number: -->
+<!--     <input type='text' id='ci_build_number'> -->
+<!--     <button type='button' id='ci_build_number_btn' class='btn btn-default'>Go!</button> -->
+<!--   </p> -->
+<!-- </p> -->
 {% endblock %}
 {% block th %}
   <th data-sort="string">User</th>
@@ -33,7 +33,7 @@
       <td>{{ user.login }}</td>
       {% endif %}
       {% for lang in langs %}
-        <td>{{ user.contribution[lang]|round(2) }}%</td>
+        <td>{{ user.contribution[lang]|round(3) }}%</td>
       {% endfor %}
     </tr>
   {% endfor %}

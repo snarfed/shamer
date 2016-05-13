@@ -19,7 +19,7 @@
     >
       <td>{{ leaderboard.all_pr[pr].title }}</td>
       {% for lang in langs %}
-        <td>{{ coverage[lang]|round(2) }}%</td>
+        <td>{{ coverage[lang]|round(3) }}%</td>
       {% endfor %}
     </tr>
   {% endfor %}

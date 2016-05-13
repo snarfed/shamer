@@ -12,7 +12,11 @@
 }
 {% endblock %}
 {% block body %}
-<h1>{% block heading %}{{ org|title }} Shamer{% endblock %}</h1>
+<h1>{% block heading %}
+  <img src="https://d39qwuyx4j19pn.cloudfront.net/images/press/Color_Logo_PNG.png"
+       height="100px" style="float: right">
+  Test coverage leaderboard!
+{% endblock %}</h1>
 <br>
 <p class='user-info'>
   <img src="{{ user.user.avatar_url }}" width='30' height='30' />
@@ -20,7 +24,6 @@
   {% if user.user.email %}({{ user.user.email }}){% endif %}
   {% if user.user.company or user.user.location %}from {{ user.user.company or user.user.location }}{% endif %}
 </p>
-{% block extra %}{% endblock %}
 {% for repo, leaderboard in leaderboards.iteritems() if leaderboard %}
 {% set langs = all_langs[repo].split(',') %}
   <hr>
@@ -36,6 +39,8 @@
     </tbody>
   </table>
 {% endfor %}
+
+{% block extra %}{% endblock %}
 
 <script>
 $( document ).ready(function() {

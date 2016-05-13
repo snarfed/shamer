@@ -6,7 +6,7 @@ from helpers.githubbot import GithubBot
 from helpers.sources.osenv import OSConstants
 from helpers.sources.mongo import MongoConstants
 from helpers.extensions import LanguageExtensions
-import os, time, datetime
+import os, time, datetime, logging
 
 app = Flask(__name__)
 dev = os.environ.get('dev') == 'true' or not os.environ.get('PORT')
@@ -18,27 +18,27 @@ extensions = LanguageExtensions()
 LANGS = dict(zip(constants.get('GH_REPOS').split(','), constants.get('LANGS').split(';')))
 CURRENT = dict(zip(constants.get('GH_REPOS').split(','), constants.get('CURRENT').split(';')))
 
-try:
-  s3 = S3(constants.get('AWS_ACCESS_KEY'), constants.get('AWS_SECRET_KEY'), constants.get('AWS_BUCKET'))
-except:
-  s3 = None
+s3 = None
+if constants.get('GH_COMMENT').lower() == 'true':
+  try:
+    s3 = S3(constants.get('AWS_ACCESS_KEY'), constants.get('AWS_SECRET_KEY'), constants.get('AWS_BUCKET'))
+  except:
+    pass
 
 collections = zip(constants.get('GH_REPOS').split(','), constants.get('STORAGE_COLLECTIONS').split(','))
 storages = {}
 for repo_name, collection_name in collections:
   try:
-    storage = Constants(MongoConstants(collection_name, constants.get('MONGOLAB_URI')))
+    storages[repo_name] = Constants(MongoConstants(collection_name, constants.get('MONGOLAB_URI')))
   except:
-    storage = None
-  storages[repo_name] = storage
+    logging.exception('Failed to connect to storage: %s %s', repo_name, collection_name)
 
-bots ={}
+bots = {}
 for repo_name in constants.get('GH_REPOS').split(','):
   try:
-    bot = GithubBot(constants, repo_name, LANGS[repo_name], CURRENT[repo_name])
+    bots[repo_name] = GithubBot(constants, repo_name, LANGS[repo_name], CURRENT[repo_name])
   except:
-    bot = None
-  bots[repo_name] = bot
+    logging.exception('Failed to bot: %s', repo_name)
 
 @app.before_request
 def preprocess_request():
@@ -50,7 +50,7 @@ def preprocess_request():
       return redirect(url_for('login_view'))
     if session.get('next'):
       return redirect(session.pop('next'))
-    if not s3:
+    if constants.get('GH_COMMENT').lower() == 'true' and not s3:
       flash('Your S3 keys are invalid!', 'danger')
       return 'Your S3 keys are invalid!'
 
@@ -135,34 +135,63 @@ def callback_view():
     return redirect(session.pop('next'))
   return redirect(url_for('demo_view'))
 
-@app.route('/hook/<pull_request_id>/<path:object_key>')
-def hook_view(pull_request_id, object_key):
-  repo_name = request.args.get('repo_name')
+def hook(args):
+  logging.error('@ %r', args)
+  repo_name = args.get('repo_name')
   if not repo_name:
     return jsonify({'status': 'no repo name'})
   bot = bots.get(repo_name)
   storage = storages.get(repo_name)
   if bot:
-    if not pull_request_id.isdigit():
-      # pull_request_id is the branch name
+    if not args['pull_request_id'].isdigit():
+      # args['pull_request_id'] is the branch name
       if storage:
-        args = request.args.copy().to_dict()
         commit = args.pop('commit_id')
         if commit:
-          value = storage.get(pull_request_id, {})
+          value = storage.get(args['pull_request_id'], {})
           value[commit] = args
           value['current'] = args
-          storage.set(pull_request_id, value)
+          storage.set(args['pull_request_id'], value)
       try:
-        pull_request_id = bot.get_pr_by_branch(pull_request_id).number
+        args['pull_request_id'] = bot.get_pr_by_branch(args['pull_request_id']).number
       except:
         return jsonify({'status': 'no such pull request'})
-    url = url_for('go_view', object_key=object_key, _external=True)
-    if bot.process_hook(int(pull_request_id), url, request.args, storage):
+    url = url_for('go_view', object_key=args.get('object_key', ''), _external=True)
+    if bot.process_hook(int(args['pull_request_id']), url, args, storage):
       return jsonify({'status': 'success'})
     else:
       return jsonify({'status': 'restarting'})
   return jsonify({'status': 'no bot credentials'})
+
+@app.route('/hook/<pull_request_id>/<path:object_key>')
+def hook_view(pull_request_id, object_key):
+    args = request.args.copy().to_dict()
+    args.update({
+      'pull_request_id': pull_request_id,
+      'object_key': object_key,
+    })
+    return hook(args)
+
+@app.route('/coveralls', methods=['POST'])
+def coveralls_view():
+  try:
+    commit_sha = request.values['commit_sha']
+    repo_name = request.values['repo_name'].split('/')[-1]
+    lang = LANGS[repo_name]
+    assert ',' not in lang
+
+    pr = bots[repo_name].get_pr_by_commit(commit_sha)
+
+    return hook({
+      'repo_name': repo_name,
+      'commit_id': commit_sha,
+      # 'build_id': commit_sha,
+      'pull_request_id': str(pr.number) if pr else '',
+      lang: request.values.get('coverage_change', 0),
+      # no build id available :(
+    })
+  except:
+    logging.exception('Failed coveralls')
 
 @app.route('/')
 def demo_view():
@@ -194,11 +223,11 @@ def user_leaderboard_view(login):
 
 @app.template_filter('min')
 def min_filter(l):
-  return min(l)
+  return min(l) if l else 0
 
 @app.template_filter('sum')
 def sum_filter(l):
-  return sum(l)
+  return sum(l) if l else 0
 
 @app.template_filter('lang_nice')
 def lang_nice_filter(s):
@@ -206,6 +235,6 @@ def lang_nice_filter(s):
 
 if __name__ == '__main__':
   if dev:
-    app.run(host='0.0.0.0', port=5000, debug=True)
+    app.run(host='0.0.0.0', port=5000, debug=False)
   else:
     app.run(host='0.0.0.0', port=int(os.environ.get('PORT')), debug=False)
