@@ -43,6 +43,10 @@
     "GH_REPOS": {
       "description": "Comma-separated Github repo names to track coverage for"
     },
+    "GH_COMMENT": {
+      "description": "Whether to comment on GitHub PRs",
+      "value": "true"
+    },
     "LANGS": {
       "description": "Comma-separated language file extensions (such as rb,js) to collect coverage for (semicolon-separated for multiple repos, one per repo)"
     },

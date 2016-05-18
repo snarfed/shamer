@@ -18,10 +18,12 @@ extensions = LanguageExtensions()
 LANGS = dict(zip(constants.get('GH_REPOS').split(','), constants.get('LANGS').split(';')))
 CURRENT = dict(zip(constants.get('GH_REPOS').split(','), constants.get('CURRENT').split(';')))
 
-try:
-  s3 = S3(constants.get('AWS_ACCESS_KEY'), constants.get('AWS_SECRET_KEY'), constants.get('AWS_BUCKET'))
-except:
-  s3 = None
+s3 = None
+if constants.get('GH_COMMENT').lower() == 'true':
+  try:
+    s3 = S3(constants.get('AWS_ACCESS_KEY'), constants.get('AWS_SECRET_KEY'), constants.get('AWS_BUCKET'))
+  except:
+    pass
 
 collections = zip(constants.get('GH_REPOS').split(','), constants.get('STORAGE_COLLECTIONS').split(','))
 storages = {}
@@ -50,7 +52,7 @@ def preprocess_request():
       return redirect(url_for('login_view'))
     if session.get('next'):
       return redirect(session.pop('next'))
-    if not s3:
+    if constants.get('GH_COMMENT').lower() == 'true' and not s3:
       flash('Your S3 keys are invalid!', 'danger')
       return 'Your S3 keys are invalid!'
 

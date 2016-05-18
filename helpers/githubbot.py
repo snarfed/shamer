@@ -96,11 +96,12 @@ class GithubBot():
     self.post_comment(body, pr)
 
   def post_comment(self, body, pr):
-    past_comment = self.past_comment(pr)
-    if past_comment:
-      past_comment.edit(body)
-    else:
-      pr.create_issue_comment(body)
+    if self.constants.get('GH_COMMENT').lower() == 'true':
+      past_comment = self.past_comment(pr)
+      if past_comment:
+        past_comment.edit(body)
+      else:
+        pr.create_issue_comment(body)
 
   def get_pr_by_branch(self, branch_name):
     cached = self.cache['prs'].get(branch_name)
