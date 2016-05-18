@@ -6,7 +6,7 @@ from helpers.githubbot import GithubBot
 from helpers.sources.osenv import OSConstants
 from helpers.sources.mongo import MongoConstants
 from helpers.extensions import LanguageExtensions
-import os, time, datetime
+import os, time, datetime, logging
 
 app = Flask(__name__)
 dev = os.environ.get('dev') == 'true' or not os.environ.get('PORT')
@@ -27,18 +27,16 @@ collections = zip(constants.get('GH_REPOS').split(','), constants.get('STORAGE_C
 storages = {}
 for repo_name, collection_name in collections:
   try:
-    storage = Constants(MongoConstants(collection_name, constants.get('MONGOLAB_URI')))
+    storages[repo_name] = Constants(MongoConstants(collection_name, constants.get('MONGOLAB_URI')))
   except:
-    storage = None
-  storages[repo_name] = storage
+    logging.exception('Failed to connect to storage: %s %s', repo_name, collection_name)
 
-bots ={}
+bots = {}
 for repo_name in constants.get('GH_REPOS').split(','):
   try:
-    bot = GithubBot(constants, repo_name, LANGS[repo_name], CURRENT[repo_name])
+    bots[repo_name] = GithubBot(constants, repo_name, LANGS[repo_name], CURRENT[repo_name])
   except:
-    bot = None
-  bots[repo_name] = bot
+    logging.exception('Failed to bot: %s', repo_name)
 
 @app.before_request
 def preprocess_request():
@@ -194,11 +192,11 @@ def user_leaderboard_view(login):
 
 @app.template_filter('min')
 def min_filter(l):
-  return min(l)
+  return min(l) if l else 0
 
 @app.template_filter('sum')
 def sum_filter(l):
-  return sum(l)
+  return sum(l) if l else 0
 
 @app.template_filter('lang_nice')
 def lang_nice_filter(s):
@@ -206,6 +204,6 @@ def lang_nice_filter(s):
 
 if __name__ == '__main__':
   if dev:
-    app.run(host='0.0.0.0', port=5000, debug=True)
+    app.run(host='0.0.0.0', port=5000, debug=False)
   else:
     app.run(host='0.0.0.0', port=int(os.environ.get('PORT')), debug=False)
