@@ -36,8 +36,6 @@ class GithubBot():
     ci_restart_url = self.constants.get('CI_RESTART_URL')
     ci_api_key = self.constants.get('CI_API_KEY')
     build_id = args.get('build_id')
-    coverage_diffs = {}
-    base_commit_sha = None
     if not storage.get('master'):
       default = dict(zip(self.languages, self.current))
       default.update({'repo_name': self.repo.name, 'build_id': '1'})
@@ -48,10 +46,10 @@ class GithubBot():
       base_commit_sha = sorted(storage.get('master').items(), key=lambda x: x[1]['build_id'])[0][0]
     # Sometimes coverage reports do funky things. This should prevent recording most of them.
     coverage_diffs = self.do_for_each_language(lambda l: float(args.get(l, 0)) - float(storage.get('master').get(base_commit_sha).get(l, 0)))
-    if min(coverage_diffs.values()) < -10:
+    if build_id and min(coverage_diffs.values()) < -10:
       commit = self.repo.get_commit(args.get('commit_id')) or pr.get_commits().reversed[0]
       user = storage.get(commit.author.login) or {'name': commit.author.name, 'login': commit.author.login}
-      if build_id and ci_restart_url and user.get('dangerously_low') != True:
+      if ci_restart_url and user.get('dangerously_low') != True:
         user['dangerously_low'] = True
         storage.set(pr.user.login, user)
         url = ci_restart_url.replace('$build_id$', build_id).replace('$api_key$', ci_api_key)
@@ -143,7 +141,7 @@ class GithubBot():
     cached = self.cache['prs'].get(sha)
     if cached:
       return cached
-    prs = self.g.search_issues('%s type:pr is:merged' % sha)
+    prs = self.g.search_issues('{} type:pr is:merged'.format(sha))
     if prs:
       self.cache['prs'][sha] = prs[0]
       return prs[0]

@@ -1,4 +1,5 @@
 from flask import Flask, redirect, session, request, render_template, url_for, flash, jsonify, send_file, make_response
+from helpers import update
 from helpers.s3 import S3
 from helpers.constants import Constants
 from helpers.githubuser import GithubUser, PublicGithubUser
@@ -135,33 +136,6 @@ def callback_view():
     return redirect(session.pop('next'))
   return redirect(url_for('demo_view'))
 
-def hook(args):
-  repo_name = args.get('repo_name')
-  if not repo_name:
-    return jsonify({'status': 'no repo name'})
-  bot = bots.get(repo_name)
-  storage = storages.get(repo_name)
-  if bot:
-    if not args['pull_request_id'].isdigit():
-      # args['pull_request_id'] is the branch name
-      if storage:
-        commit = args.pop('commit_id')
-        if commit:
-          value = storage.get(args['pull_request_id'], {})
-          value[commit] = args
-          value['current'] = args
-          storage.set(args['pull_request_id'], value)
-      try:
-        args['pull_request_id'] = bot.get_pr_by_branch(args['pull_request_id']).number
-      except:
-        return jsonify({'status': 'no such pull request'})
-    url = url_for('go_view', object_key=args.get('object_key', ''), _external=True)
-    if bot.process_hook(int(args['pull_request_id']), url, args, storage):
-      return jsonify({'status': 'success'})
-    else:
-      return jsonify({'status': 'restarting'})
-  return jsonify({'status': 'no bot credentials'})
-
 @app.route('/hook/<pull_request_id>/<path:object_key>')
 def hook_view(pull_request_id, object_key):
     args = request.args.copy().to_dict()
@@ -169,28 +143,29 @@ def hook_view(pull_request_id, object_key):
       'pull_request_id': pull_request_id,
       'object_key': object_key,
     })
-    return hook(args)
+    return update.update_coverage(args)
 
 @app.route('/coveralls', methods=['POST'])
 def coveralls_view():
+  commit_sha = request.values['commit_sha']
+  repo_name = request.values['repo_name'].split('/')[-1]
+  lang = request.values['lang']
+
+  bot = bots[repo_name]
+  if lang not in bot.languages:
+    return jsonify({'status': 'invalid language for repo: {}'.format(lang)})
+  pr = bot.get_pr_by_commit(commit_sha)
+
   try:
-    commit_sha = request.values['commit_sha']
-    repo_name = request.values['repo_name'].split('/')[-1]
-    lang = LANGS[repo_name]
-    assert ',' not in lang
-
-    pr = bots[repo_name].get_pr_by_commit(commit_sha)
-
-    return hook({
+    return update.update_coverage({
       'repo_name': repo_name,
       'commit_id': commit_sha,
-      # 'build_id': commit_sha,
       'pull_request_id': str(pr.number) if pr else '',
       lang: request.values.get('coverage_change', 0),
-      # no build id available :(
     })
-  except:
+  except Exception as e:
     logging.exception('Failed coveralls')
+    return jsonify({'error': str(e)})
 
 @app.route('/')
 def demo_view():
